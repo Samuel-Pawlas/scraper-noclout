@@ -1,44 +1,73 @@
 @echo off
 REM Noclout Scraper - Manual Run
-REM Double-click this file or run from command line to execute
+REM Double-click this file or run from command line
 
 echo ============================================================
 echo Noclout Scraper - Manual Run
 echo ============================================================
 echo.
 
-REM Set script directory
 set SCRIPT_DIR=%~dp0
+set SCRIPT_DIR=%SCRIPT_DIR:~0,-1%
 
-REM Python path (update if different)
-set PYTHON_PATH=%USERPROFILE%\AppData\Local\Programs\Python\Python312\python.exe
-
-REM Check Python exists
-if not exist "%PYTHON_PATH%" (
-    echo ERROR: Python not found at %PYTHON_PATH%
-    echo Please install Python 3.12 from https://python.org
-    pause
-    exit /b 1
+REM Try multiple Python paths
+where python >nul 2>&1
+if %errorlevel%==0 (
+    set PYTHON=python
+) else (
+    where py >nul 2>&1
+    if %errorlevel%==0 (
+        set PYTHON=py
+    ) else (
+        if exist "%USERPROFILE%\AppData\Local\Programs\Python\Python312\python.exe" (
+            set PYTHON=%USERPROFILE%\AppData\Local\Programs\Python\Python312\python.exe
+        ) else (
+            echo ERROR: Python not found
+            echo Please install Python 3.12 from https://python.org
+            pause
+            exit /b 1
+        )
+    )
 )
 
-REM Install dependencies if needed
-echo Checking dependencies...
-"%PYTHON_PATH%" -m pip install -q -r "%SCRIPT_DIR%requirements.txt"
+echo Using Python: %PYTHON%
+echo.
+
+REM Check Python version
+%PYTHON% --version
 if errorlevel 1 (
-    echo ERROR: Failed to install dependencies
+    echo ERROR: Failed to run Python
     pause
     exit /b 1
 )
+echo.
+
+REM Check dependencies
+echo Checking dependencies...
+%PYTHON% -c "import requests, bs4, supabase, PIL, numpy, torch, transformers" 2>nul
+if errorlevel 1 (
+    echo Installing dependencies...
+    %PYTHON% -m pip install -r "%SCRIPT_DIR%\requirements.txt" -q
+    if errorlevel 1 (
+        echo ERROR: Failed to install dependencies
+        pause
+        exit /b 1
+    )
+    echo Dependencies installed
+)
+echo.
 
 REM Run the scraper
 echo Starting scraper...
 echo.
-"%PYTHON_PATH%" "%SCRIPT_DIR%scraper.py"
+cd /d "%SCRIPT_DIR%"
+%PYTHON% "%SCRIPT_DIR%\scraper.py"
 
 if errorlevel 1 (
     echo.
     echo ============================================================
-    echo Scraper failed with error code %errorlevel%
+    echo Scraper failed!
+    echo Check scraper_errors.log for details
     echo ============================================================
     pause
     exit /b 1

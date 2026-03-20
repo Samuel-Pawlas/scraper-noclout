@@ -147,26 +147,44 @@ class SigLIPEmbedder:
         if img is None:
             return None
         
-        inputs = self.processor(images=img, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        
-        with torch.no_grad():
-            outputs = self.model.get_image_features(**inputs)
-            embedding = outputs.cpu().numpy().flatten().tolist()
-        
-        time.sleep(EMBEDDING_DELAY)
-        return embedding
+        try:
+            inputs = self.processor(images=img, return_tensors="pt")
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            
+            with torch.no_grad():
+                outputs = self.model.get_image_features(**inputs)
+                if hasattr(outputs, 'last_hidden_state'):
+                    embedding = outputs.last_hidden_state.mean(dim=1).cpu().numpy().flatten().tolist()
+                elif hasattr(outputs, 'pooler_output'):
+                    embedding = outputs.pooler_output.cpu().numpy().flatten().tolist()
+                else:
+                    embedding = outputs.cpu().numpy().flatten().tolist()
+            
+            time.sleep(EMBEDDING_DELAY)
+            return embedding
+        except Exception as e:
+            logger.error(f"Error generating image embedding: {e}")
+            return None
 
     def generate_text_embedding(self, text: str) -> Optional[List[float]]:
-        inputs = self.processor(text=text, return_tensors="pt", padding=True, truncation=True)
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        
-        with torch.no_grad():
-            outputs = self.model.get_text_features(**inputs)
-            embedding = outputs.cpu().numpy().flatten().tolist()
-        
-        time.sleep(EMBEDDING_DELAY)
-        return embedding
+        try:
+            inputs = self.processor(text=text, return_tensors="pt", padding=True, truncation=True)
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            
+            with torch.no_grad():
+                outputs = self.model.get_text_features(**inputs)
+                if hasattr(outputs, 'last_hidden_state'):
+                    embedding = outputs.last_hidden_state.mean(dim=1).cpu().numpy().flatten().tolist()
+                elif hasattr(outputs, 'pooler_output'):
+                    embedding = outputs.pooler_output.cpu().numpy().flatten().tolist()
+                else:
+                    embedding = outputs.cpu().numpy().flatten().tolist()
+            
+            time.sleep(EMBEDDING_DELAY)
+            return embedding
+        except Exception as e:
+            logger.error(f"Error generating text embedding: {e}")
+            return None
 
 
 class ShopifyScraper:

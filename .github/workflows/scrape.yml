@@ -1,7 +1,6 @@
 name: Noclout Scraper
 
 on:
-  # Run manually from GitHub Actions tab
   workflow_dispatch:
     inputs:
       run_type:
@@ -13,19 +12,17 @@ on:
           - full
           - verify_only
   
-  # Run daily at midnight UTC (which is 1AM CET)
   schedule:
     - cron: '0 0 * * *'
 
 env:
   PYTHON_VERSION: '3.12'
-  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
 
 jobs:
   scrape:
     name: Run Scraper
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     
     steps:
       - name: Checkout code
@@ -43,41 +40,59 @@ jobs:
           path: |
             ~/.cache/huggingface
             ~/.cache/torch
-          key: hf-models-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            hf-models-
+          key: hf-models-v1
       
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
       
-      - name: Verify environment
+      - name: Verify environment and secrets
         if: inputs.run_type == 'verify_only'
         run: |
           python -c "
-          from scraper import NocloutScraper
-          print('✓ Scraper imports OK')
-          from supabase import create_client
-          print('✓ Supabase client OK')
+          import os
+          print('=== Environment Check ===')
+          supabase_url = os.environ.get('SUPABASE_URL', '')
+          supabase_key = os.environ.get('SUPABASE_KEY', '')
+          print(f'SUPABASE_URL: {\"SET\" if supabase_url else \"NOT SET\"}')
+          print(f'SUPABASE_KEY: {\"SET (\" + str(len(supabase_key)) + \" chars)\" if supabase_key else \"NOT SET\"}')
+          
+          if supabase_url and supabase_key:
+              from supabase import create_client
+              client = create_client(supabase_url, supabase_key)
+              print('✓ Supabase client created')
+              
+              try:
+                  result = client.table('products').select('id').limit(1).execute()
+                  print('✓ Database connection OK')
+                  print(f'✓ Products table accessible')
+              except Exception as e:
+                  print(f'✗ Database error: {e}')
+          else:
+              print('✗ Secrets not properly configured in GitHub!')
+              print('Go to: Settings → Secrets and variables → Actions')
+              exit(1)
           "
-      
-      - name: Run scraper
-        if: inputs.run_type == 'full'
-        run: |
-          python scraper.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       
-      - name: Upload error logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scraper-logs
-          path: |
-            scraper_errors.log
-            scraper_log_*.log
-          retention-days: 7
+      - name: Run scraper with retry
+        if: inputs.run_type == 'full'
+        run: |
+          echo "Starting scraper with retry logic..."
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            python scraper.py && exit 0
+            echo "Attempt $i failed (exit code $?), waiting 15s..."
+            sleep 15
+          done
+          echo "All attempts failed"
+          exit 1
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        timeout-minutes: 25
 
   summary:
     name: Run Summary
@@ -86,19 +101,23 @@ jobs:
     if: always()
     
     steps:
-      - name: Download logs
-        if: needs.scrape.result == 'failure'
-        uses: actions/download-artifact@v4
-        with:
-          name: scraper-logs
-          path: logs
-      
-      - name: Show failure info
-        if: needs.scrape.result == 'failure'
+      - name: Check result
         run: |
-          echo "## Scraper Failed"
-          echo "Please check the logs for details."
-          if [ -d logs ]; then
-            echo "### Log Files"
-            ls -la logs/
+          echo "=== Scraper Run Result ==="
+          if [ "${{ needs.scrape.result }}" == "success" ]; then
+            echo "✅ Completed successfully"
+          elif [ "${{ needs.scrape.result }}" == "failure" ]; then
+            echo "❌ Failed - Common causes:"
+            echo "  • Network/DNS not working in GitHub Actions"
+            echo "  • Missing or incorrect secrets"
+            echo "  • Supabase project suspended"
+            echo ""
+            echo "=== Debug Steps ==="
+            echo "1. Go to: https://github.com/Samuel-Pawlas/scraper-noclout/settings/secrets/actions"
+            echo "2. Verify SUPABASE_URL and SUPABASE_KEY are set"
+            echo "3. Try 'Verify only' run first to test connectivity"
+            exit 1
+          else
+            echo "⚠️ Cancelled or inconclusive"
+            exit 1
           fi
